@@ -1,5 +1,8 @@
 # Beyond Structural Constraints: A Lyapunov-Inspired Zero-Cost Proxy for Efficient NAS of Generalizable Spiking Neural Networks
+*Our code is currently under active update and upload, and the complete code will be available soon.*
+
 Pytorch implementation code for [Beyond Structural Constraints: A Lyapunov-Inspired Zero-Cost Proxy for Efficient NAS of Generalizable Spiking Neural Networks]
+
 ## Introduction
 
 ## Prerequisites
