@@ -4,8 +4,8 @@
 Pytorch implementation code for [Beyond Structural Constraints: A Lyapunov-Inspired Zero-Cost Proxy for Efficient NAS of Generalizable Spiking Neural Networks]
 
 ## Introduction
-
-## Prerequisites
+## How to run
+### Prerequisites
 * Python 3.8
 * Pytorch==2.3.1
 * Spikingjelly==0.0.0.0.12
@@ -14,8 +14,7 @@ Pytorch implementation code for [Beyond Structural Constraints: A Lyapunov-Inspi
 * timm==0.5.4
 * smac==2.2.0
 
-## Getting Started
-### Conda Environment Setting
+### Getting Started
+#### Conda Environment Setting
 
 
-## Citing us
