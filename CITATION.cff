@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the L-NAS manuscript."
+title: "L-NAS: Lyapunov-Inspired Zero-Cost Proxy for Efficient Spiking Neural Architecture Search"
+type: software
+version: 1.0.0
+authors:
+  - family-names: Yang
+    given-names: Mingxuan
+  - family-names: Wu
+    given-names: Xiaojun
+  - family-names: Wang
+    given-names: Michael Yu
+repository-code: "https://github.com/YMX-zknu/LLEforNAS"

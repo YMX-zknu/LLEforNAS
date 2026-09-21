@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "l-nas"
+version = "1.0.0"
+description = "Lyapunov-inspired zero-cost proxy and joint architecture-timestep search for SNNs"
+readme = "README.md"
+requires-python = ">=3.9,<3.12"
+authors = [
+  {name = "Mingxuan Yang"},
+  {name = "Xiaojun Wu"},
+  {name = "Michael Yu Wang"},
+]
+dependencies = [
+  "numpy>=1.24,<2.0",
+  "PyYAML>=6.0",
+  "torch>=2.3,<2.5",
+  "torchvision>=0.18,<0.20",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+events = ["spikingjelly==0.0.0.0.12"]
+analysis = ["matplotlib>=3.8", "pandas>=2.0", "scipy>=1.11", "openpyxl>=3.1"]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6"]
+all = [
+  "spikingjelly==0.0.0.0.12",
+  "matplotlib>=3.8",
+  "pandas>=2.0",
+  "scipy>=1.11",
+  "openpyxl>=3.1",
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+lnas = "lnas.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["UP006", "UP007", "UP035"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

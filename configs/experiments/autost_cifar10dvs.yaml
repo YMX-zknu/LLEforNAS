@@ -1,0 +1,37 @@
+seed: 2025
+device: auto
+output_dir: runs/autost_cifar10dvs
+dataset:
+  name: cifar10dvs
+  root: data
+  timesteps: 10
+  image_size: 32
+  batch_size: 16
+  workers: 4
+  download: true
+model:
+  search_space: autost
+  architecture: null
+  width: 192
+  tau: 2.0
+  threshold: 1.0
+  surrogate_alpha: 2.0
+proxy:
+  name: lle
+  batches: 1
+  repeats: 1
+  max_outputs: 10
+  epsilon: 1.0e-8
+  stable_only: true
+search:
+  method: evolution
+  candidates: 1000
+  timestep_min: 2
+  timestep_max: 14
+  timestep_trials: 5
+training:
+  epochs: 30
+  learning_rate: 0.001
+  weight_decay: 0.06
+  optimizer: adamw
+  momentum: 0.9

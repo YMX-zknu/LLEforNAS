@@ -1,0 +1,37 @@
+seed: 2025
+device: cpu
+output_dir: runs/smoke
+dataset:
+  name: synthetic
+  root: data
+  timesteps: 4
+  image_size: 16
+  batch_size: 4
+  workers: 0
+  download: false
+model:
+  search_space: snasnet
+  architecture: null
+  width: 16
+  tau: 2.0
+  threshold: 1.0
+  surrogate_alpha: 2.0
+proxy:
+  name: lle
+  batches: 1
+  repeats: 1
+  max_outputs: 4
+  epsilon: 1.0e-8
+  stable_only: true
+search:
+  method: random
+  candidates: 3
+  timestep_min: 2
+  timestep_max: 6
+  timestep_trials: 3
+training:
+  epochs: 1
+  learning_rate: 0.01
+  weight_decay: 0.0005
+  optimizer: sgd
+  momentum: 0.9
