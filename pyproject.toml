@@ -50,6 +50,9 @@ target-version = "py39"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["UP006", "UP007", "UP035"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["lnas"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
