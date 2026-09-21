@@ -147,4 +147,4 @@ Static-dataset ImageNet and CIFAR-10 results are final selected-model evaluation
 - `details`: probes, transition count, state size, parameters, and selected timestep when applicable;
 - `architecture`: complete search-space representation.
 
-Unavailable recomputed values in the revised manuscript remain `xx` until these protocols are run. Existing final accuracies are retained only where their original experimental provenance is clear.
+Unavailable recomputed values in the revised manuscript remain blank until these protocols are run. Existing final accuracies are retained only where their original experimental provenance is clear.
