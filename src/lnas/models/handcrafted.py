@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Tuple
 
 import torch
 from torch import nn
@@ -33,12 +33,14 @@ class HandcraftedSNN(TemporalClassifier):
         self.head = nn.Linear(current, classes)
         self.apply(initialize_module)
 
-    def forward_sequence(self, inputs: torch.Tensor) -> torch.Tensor:
-        states: List[torch.Tensor | None] = [None] * len(self.blocks)
-        outputs = []
-        for frame in inputs.unbind(dim=1):
-            value = frame
-            for index, block in enumerate(self.blocks):
-                value, states[index] = block.step(value, states[index])
-            outputs.append(self.head(self.pool(value).flatten(1)))
-        return torch.stack(outputs, dim=1)
+    def step(
+        self, frame: torch.Tensor, state: Tuple[torch.Tensor, ...] | None
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        previous = list(state) if state is not None else [None] * len(self.blocks)
+        next_state: List[torch.Tensor] = []
+        value = frame
+        for index, block in enumerate(self.blocks):
+            value, membrane = block.step(value, previous[index])
+            next_state.append(membrane)
+        output = self.head(self.pool(value).flatten(1))
+        return output, tuple(next_state)

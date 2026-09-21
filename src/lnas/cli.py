@@ -10,10 +10,12 @@ from typing import Any, Dict
 
 import torch
 
+from lnas.analysis import finite_perturbation_growth, profile_proxy
 from lnas.config import ExperimentConfig, load_config
 from lnas.data import SPECS, build_datasets, build_loaders
 from lnas.engine import collect_batches, evaluate_architecture, train_model
 from lnas.models import build_model
+from lnas.proxies import build_proxy
 from lnas.runtime import atomic_json, resolve_device, seed_everything
 from lnas.search import run_jatst, run_search
 from lnas.search.spaces import get_search_space
@@ -117,9 +119,8 @@ def command_jatst(args) -> None:
         space,
         evaluate,
         config.search.candidates,
-        config.search.timestep_min,
-        config.search.timestep_max,
-        config.search.timestep_trials,
+        config.search.timesteps,
+        config.search.method,
         config.seed,
     )
     _write_search(config.output_dir, records)
@@ -135,6 +136,72 @@ def command_train(args) -> None:
     architecture = _architecture(args.architecture, config.model.architecture)
     model = build_model(config.model, bundle.spec, architecture).to(device)
     train_model(model, train_loader, test_loader, bundle.spec, config, architecture, device)
+
+
+def command_perturbation(args) -> None:
+    config = _load(args)
+    device = resolve_device(config.device)
+    bundle = build_datasets(config.dataset, config.seed)
+    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
+    inputs = collect_batches(
+        train_loader, 1, bundle.spec, config.dataset.timesteps, device
+    )[0]
+    results = {}
+    for tau in args.taus:
+        runs = []
+        for offset in range(args.seeds):
+            seed_everything(config.seed + offset)
+            model_config = replace(config.model, search_space="hc-snn", tau=tau)
+            model = build_model(model_config, bundle.spec, {"name": "sew-resnet18"}).to(device)
+            measurement = finite_perturbation_growth(
+                model,
+                inputs,
+                epsilon=args.epsilon,
+                directions=args.directions,
+                warmup_steps=config.proxy.warmup_steps,
+            )
+            measurement["seed"] = config.seed + offset
+            runs.append(measurement)
+        results[str(tau)] = runs
+    payload = {
+        "architecture": "sew-resnet18",
+        "dataset": config.dataset.name,
+        "timesteps": config.dataset.timesteps,
+        "epsilon": args.epsilon,
+        "directions": args.directions,
+        "runs": results,
+    }
+    path = Path(config.output_dir) / "perturbation.json"
+    atomic_json(path, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def command_profile(args) -> None:
+    config = _load(args)
+    seed_everything(config.seed)
+    device = resolve_device(config.device)
+    bundle = build_datasets(config.dataset, config.seed)
+    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
+    inputs = collect_batches(
+        train_loader, 1, bundle.spec, config.dataset.timesteps, device
+    )[0]
+    architecture = _architecture(args.architecture, config.model.architecture)
+    model = build_model(config.model, bundle.spec, architecture).to(device).eval()
+    results = {}
+    for name in args.proxies:
+        proxy = build_proxy(replace(config.proxy, name=name))
+        results[name] = profile_proxy(proxy, model, inputs, args.repeats, args.warmup)
+    payload = {
+        "architecture": architecture,
+        "dataset": config.dataset.name,
+        "batch_size": int(inputs.shape[0]),
+        "timesteps": int(inputs.shape[1]),
+        "device": str(device),
+        "results": results,
+    }
+    path = Path(config.output_dir) / "profile.json"
+    atomic_json(path, payload)
+    print(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def command_doctor(_args) -> None:
@@ -158,7 +225,8 @@ def command_list(_args) -> None:
     print("datasets: " + ", ".join(sorted(SPECS)))
     print("search spaces: snasnet, autosnn, autost, hc-snn, hc-st")
     print("proxies: lle, hd, sahd, flops")
-    print("search methods: random, evolution, jatst")
+    print("search methods: random, evolution")
+    print("commands: score, search, jatst, train, perturbation, profile")
 
 
 def _configured(subparsers, name, function, architecture=False):
@@ -181,6 +249,22 @@ def build_parser() -> argparse.ArgumentParser:
     _configured(subparsers, "search", command_search)
     _configured(subparsers, "jatst", command_jatst)
     _configured(subparsers, "train", command_train, architecture=True)
+    perturbation = subparsers.add_parser("perturbation")
+    perturbation.add_argument("--config", required=True)
+    perturbation.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    perturbation.add_argument("--taus", type=float, nargs="+", default=[1.5, 2.0, 2.5, 3.0])
+    perturbation.add_argument("--epsilon", type=float, default=1e-3)
+    perturbation.add_argument("--directions", type=int, default=3)
+    perturbation.add_argument("--seeds", type=int, default=5)
+    perturbation.set_defaults(function=command_perturbation)
+    profile = subparsers.add_parser("profile")
+    profile.add_argument("--config", required=True)
+    profile.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    profile.add_argument("--architecture")
+    profile.add_argument("--proxies", nargs="+", default=["hd", "sahd", "flops", "lle"])
+    profile.add_argument("--repeats", type=int, default=5)
+    profile.add_argument("--warmup", type=int, default=1)
+    profile.set_defaults(function=command_profile)
     return parser
 
 

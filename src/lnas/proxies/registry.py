@@ -8,7 +8,7 @@ from .lle import LLEProxy
 def build_proxy(config: ProxyConfig):
     name = config.name.lower()
     if name == "lle":
-        return LLEProxy(config.max_outputs, config.epsilon, config.stable_only)
+        return LLEProxy(config.probes, config.warmup_steps, config.epsilon)
     if name == "hd":
         return ActivationKernelProxy(False, config.epsilon)
     if name == "sahd":

@@ -73,22 +73,34 @@ class AutoSNN(TemporalClassifier):
             else:
                 modules.append(AutoBlock(current, name, tau, threshold, alpha))
         self.blocks = nn.ModuleList(modules)
+        self.stateful_indices = [
+            index
+            for index, block in enumerate(self.blocks)
+            if isinstance(block, AutoBlock) and block.neuron is not None
+        ]
         self.output_neuron = LIFCell(tau, threshold, alpha)
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.head = nn.Linear(current, classes)
         self.apply(initialize_module)
 
-    def forward_sequence(self, inputs: torch.Tensor) -> torch.Tensor:
-        states: List[torch.Tensor | None] = [None] * len(self.blocks)
-        output_state = None
-        outputs = []
-        for frame in inputs.unbind(dim=1):
-            value = self.stem(frame)
-            for index, block in enumerate(self.blocks):
-                if isinstance(block, AutoBlock):
-                    value, states[index] = block.step(value, states[index])
+    def step(
+        self, frame: torch.Tensor, state: Tuple[torch.Tensor, ...] | None
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        previous = list(state) if state is not None else [None] * (len(self.stateful_indices) + 1)
+        next_state: List[torch.Tensor] = []
+        value = self.stem(frame)
+        state_index = 0
+        for block in self.blocks:
+            if isinstance(block, AutoBlock):
+                if block.neuron is None:
+                    value, _unused = block.step(value, None)
                 else:
-                    value = block(value)
-            value, output_state = self.output_neuron(value, output_state)
-            outputs.append(self.head(self.pool(value).flatten(1)))
-        return torch.stack(outputs, dim=1)
+                    value, membrane = block.step(value, previous[state_index])
+                    next_state.append(membrane)
+                    state_index += 1
+            else:
+                value = block(value)
+        value, output_state = self.output_neuron(value, previous[-1])
+        next_state.append(output_state)
+        output = self.head(self.pool(value).flatten(1))
+        return output, tuple(next_state)

@@ -3,49 +3,25 @@
 [![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Official implementation of **L-NAS: Lyapunov-Inspired Zero-Cost Proxy for Efficient Spiking Neural Architecture Search**.
+Official implementation of **L-NAS: A Lyapunov-Inspired Training-Free Proxy for Efficient Spiking Neural Architecture Search**.
 
-L-NAS evaluates untrained spiking neural networks with a finite-time Lyapunov-inspired score and supports joint architecture-timestep search (JATST). The repository provides one configuration system and one command-line interface for the five search spaces used in the manuscript:
+L-NAS ranks an untrained spiking neural network by matrix-free finite-time hidden-state perturbation growth. The implementation propagates random tangent vectors with Jacobian--vector products (JVPs), renormalizes them after every timestep, and accumulates logarithmic growth in FP64. It does not construct a full Jacobian, multiply Jacobian matrices, or perform an explicit SVD. In this repository, *zero-cost* means *training-free scoring at initialization*; runtime and memory are measured costs rather than zero.
 
-| Family | Search space | Repository name |
+The same configuration and `[batch, time, channel, height, width]` tensor convention are used for all supported datasets and search spaces. Dataset metadata supplies input channels, classes, image size, and static-to-temporal conversion, so changing spaces does not require source edits.
+
+## Supported search spaces
+
+| Family | Manuscript name | Configuration value |
 |---|---|---|
 | Automatically designed CNN | SNASNet | `snasnet` |
 | Automatically designed CNN | AutoSNN | `autosnn` |
 | Automatically designed transformer | AutoST | `autost` |
-| Hand-crafted CNN collection | HC-SNN Set | `hc-snn` |
-| Hand-crafted transformer collection | HC-ST Set | `hc-st` |
+| Hand-crafted CNN set | HC-SNN Set | `hc-snn` |
+| Hand-crafted transformer set | HC-ST Set | `hc-st` |
 
-The refactored code uses a single public tensor layout, `[batch, time, channel, height, width]`. Dataset metadata supplies the channel count, class count, resolution, and temporal encoding to every model. Switching datasets or search spaces no longer requires editing source files.
+## Installation
 
-## Features
-
-- LLE, HD, SAHD, and FLOPs proxies behind a common interface.
-- Random search and evolutionary search for all five search spaces.
-- JATST with discrete Bayesian optimization over timesteps.
-- N-MNIST, CIFAR10-DVS, DVS128 Gesture, N-Caltech101, CIFAR-10, and ImageNet loaders.
-- CPU-only synthetic smoke test with no dataset download.
-- Deterministic seeding, validated YAML configuration, JSON results, and resumable model artifacts.
-- Automatic input adaptation for static and event-based datasets.
-- Unit tests and GitHub Actions checks for Python 3.9-3.11.
-
-## Repository layout
-
-```text
-configs/                 Reproducible experiment configurations
-scripts/                 Ready-to-run search commands
-src/lnas/data/           Dataset registry and input normalization
-src/lnas/models/         Unified SNNs and search-space builders
-src/lnas/proxies/        LLE, HD, SAHD, and FLOPs
-src/lnas/search/         Random, evolutionary, and JATST search
-src/lnas/engine/         Scoring and training loops
-tests/                   Configuration, shape, proxy, and JATST tests
-```
-
-## 1. Installation
-
-The manuscript environment used PyTorch 2.3.1 and SpikingJelly 0.0.0.0.12. Python 3.10 is recommended.
-
-### Conda with CUDA 12.1
+Python 3.10 is recommended; CI checks Python 3.9--3.12.
 
 ```bash
 git clone https://github.com/YMX-zknu/LLEforNAS.git
@@ -54,61 +30,52 @@ conda env create -f environment.yml
 conda activate lnas
 ```
 
-### Existing PyTorch environment
+To install into an existing PyTorch environment:
 
 ```bash
-git clone https://github.com/YMX-zknu/LLEforNAS.git
-cd LLEforNAS
 python -m pip install --upgrade pip
 pip install -e .[events,analysis]
 ```
 
-For development:
+For development and tests:
 
 ```bash
 pip install -e .[all]
-```
-
-Verify the installation:
-
-```bash
 lnas doctor
-lnas list
+pytest
+ruff check .
 ```
 
-`lnas doctor` reports the Python, PyTorch, CUDA, torchvision, NumPy, PyYAML, and SpikingJelly versions detected in the active environment.
+The paper experiments used PyTorch 2.3.1 and SpikingJelly 0.0.0.0.12. The package accepts compatible PyTorch 2.3--2.4 releases.
 
-## 2. Run the smoke test
+## Quick verification
 
-The smoke configuration uses generated event frames and runs on CPU.
+The smoke test is CPU-only and downloads no data.
 
 ```bash
 bash scripts/smoke_test.sh
 ```
 
-Individual commands are also available:
+It validates environment discovery, one LLE score, and a three-candidate search under `configs/smoke.yaml`.
 
-```bash
-lnas score --config configs/smoke.yaml
-lnas search --config configs/smoke.yaml
-```
+## Dataset layout
 
-The results are written to `runs/smoke/`.
+Set `dataset.root` in YAML or override it on the command line.
 
-## 3. Prepare datasets
+| Dataset | Name | Expected location |
+|---|---|---|
+| N-MNIST | `nmnist` | `<root>/nmnist` |
+| CIFAR10-DVS | `cifar10dvs` | `<root>/cifar10dvs` |
+| DVS128 Gesture | `dvs128gesture` | `<root>/dvs128gesture` |
+| N-Caltech101 | `ncaltech101` | `<root>/ncaltech101` |
+| CIFAR-10 | `cifar10` | `<root>/cifar10` |
+| ImageNet-1K | `imagenet` | `<root>/imagenet/{train,val}` |
 
-Set `dataset.root` in a YAML file or override it from the command line. SpikingJelly downloads supported event datasets when their loader permits it. ImageNet must be prepared manually.
+Event datasets are loaded as frame sequences. Static images are repeated along the temporal axis by the shared data adapter. ImageNet must be prepared manually.
 
-| Dataset | Configuration name | Classes | Input | Expected root |
-|---|---:|---:|---|---|
-| N-MNIST | `nmnist` | 10 | event frames | `<root>/nmnist` |
-| CIFAR10-DVS | `cifar10dvs` | 10 | event frames | `<root>/cifar10dvs` |
-| DVS128 Gesture | `dvs128gesture` | 11 | event frames | `<root>/dvs128gesture` |
-| N-Caltech101 | `ncaltech101` | 101 | event frames | `<root>/ncaltech101` |
-| CIFAR-10 | `cifar10` | 10 | static image | `<root>/cifar10` |
-| ImageNet-1K | `imagenet` | 1000 | static image | `<root>/imagenet/{train,val}` |
+## Score and search
 
-Example override:
+Score the default SNASNet candidate:
 
 ```bash
 lnas score \
@@ -117,25 +84,7 @@ lnas score \
   --set device=cuda:0
 ```
 
-Event loaders return `[B,T,C,H,W]`. Static images are repeated along the time axis inside `prepare_batch`; models never contain dataset-specific transpose statements.
-
-## 4. Score one untrained architecture
-
-The default architecture for the selected search space is used when no JSON file is provided.
-
-```bash
-lnas score --config configs/experiments/snasnet_cifar10dvs.yaml
-```
-
-Select another proxy without editing code:
-
-```bash
-lnas score \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --set proxy.name=sahd
-```
-
-Score an explicit architecture:
+Score an architecture stored in `best.json`:
 
 ```bash
 lnas score \
@@ -143,201 +92,96 @@ lnas score \
   --architecture runs/snasnet_cifar10dvs/best.json
 ```
 
-The command writes `score.json` with the ranking score, raw value, stability flag, parameter count, and proxy-specific diagnostics.
-
-## 5. Search an architecture
-
-### Random search
+Run architecture-only random or evolutionary search:
 
 ```bash
-bash scripts/search_snasnet.sh
-bash scripts/search_autosnn.sh
+bash scripts/search_snasnet.sh --set dataset.root=/datasets
+bash scripts/search_autosnn.sh --set dataset.root=/datasets
+bash scripts/search_autost.sh --set dataset.root=/datasets
 ```
 
-### Evolutionary search
+Search outputs are written to the configured directory as `search.jsonl` and `best.json`. Every candidate in one run receives the same cached minibatch and initialization seed.
+
+## Joint architecture--timestep search
+
+JATST searches architecture--timestep pairs directly. Both random search and evolutionary search consume the same total number of proxy evaluations; no nested Bayesian optimizer is used.
 
 ```bash
-bash scripts/search_autost.sh
-```
-
-Any configuration can switch methods:
-
-```bash
-lnas search \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
+bash scripts/jatst_snasnet.sh \
+  --set dataset.root=/datasets \
   --set search.method=evolution \
-  --set search.candidates=200
+  --set search.candidates=1000 \
+  --set 'search.timesteps=[2,4,6,8,10,12,14]'
 ```
 
-For a quick validation before a full 2,000-candidate run:
+The selected timestep is stored as `details.timestep` in each result record.
 
-```bash
-lnas search \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --set search.candidates=10 \
-  --set proxy.max_outputs=4
-```
-
-Every candidate is evaluated with the same cached minibatch and the same initialization seed. Results are sorted in descending score order and saved as:
-
-```text
-<output_dir>/search.jsonl
-<output_dir>/best.json
-```
-
-## 6. Joint architecture and timestep search
-
-JATST evaluates a discrete timestep range with Bayesian optimization for each sampled architecture.
-
-```bash
-bash scripts/jatst_snasnet.sh
-```
-
-The default manuscript range is 2-14 timesteps with five evaluations per architecture. It can be changed from the command line:
-
-```bash
-lnas jatst \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --set search.candidates=100 \
-  --set search.timestep_min=2 \
-  --set search.timestep_max=14 \
-  --set search.timestep_trials=7
-```
-
-The selected timestep is stored in the `details.timestep` field of `best.json`.
-
-## 7. Train the selected architecture
+## Train a selected architecture
 
 ```bash
 lnas train \
   --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --architecture runs/snasnet_cifar10dvs/best.json
+  --architecture runs/snasnet_cifar10dvs/best.json \
+  --set dataset.root=/datasets
 ```
 
-Training uses cross-entropy loss, cosine learning-rate annealing, and the optimizer defined in the YAML file. Outputs are:
-
-```text
-<output_dir>/best.pt
-<output_dir>/training.json
-```
-
-`best.pt` contains the architecture, model state, complete resolved configuration, epoch, and best test accuracy.
-
-## 8. Reproduce the five-space proxy comparison
-
-Run each search space with the same dataset, seed, candidate count, minibatch, and proxy settings. Only `model.search_space` and `proxy.name` should change.
+The command writes `best.pt` and `training.json`. To train an entire scored candidate pool and create the accuracy CSV used by the rank-correlation calculation:
 
 ```bash
-for space in snasnet autosnn autost hc-snn hc-st; do
-  for proxy in hd sahd flops lle; do
-    lnas search \
-      --config configs/experiments/snasnet_cifar10dvs.yaml \
-      --set model.search_space="$space" \
-      --set proxy.name="$proxy" \
-      --set output_dir="runs/comparison/${space}/${proxy}"
-  done
-done
+python scripts/train_pool.py \
+  --config configs/experiments/snasnet_cifar10dvs.yaml \
+  --scores runs/fig3/snasnet/lle/search.jsonl \
+  --output runs/fig3/snasnet/training \
+  --limit 100 \
+  --set dataset.root=/datasets
 ```
 
-For the fixed HC-SNN and HC-ST sets, set `search.candidates` to 9 and 3, respectively, to cover every architecture. Random sampling is deterministic but can revisit a fixed member if a larger budget is requested.
+## Reproduce manuscript analyses
 
-## 9. Configuration reference
+| Manuscript item | Command | Primary output |
+|---|---|---|
+| Fig. 1 dynamical bridge | `bash scripts/fig1_dynamics.sh --set dataset.root=/datasets` | `runs/fig1_dynamics/perturbation.json` |
+| Fig. 3 five-space scoring | `bash scripts/fig3_proxy_scores.sh /datasets` | `runs/fig3/<space>/<proxy>/search.jsonl` |
+| Fig. 3 rank statistics | `python scripts/rank_correlation.py --scores ... --accuracies ...` | JSON on stdout |
+| Fig. 4 robustness | commands in `docs/experiments.md` | one `score.json` per condition |
+| Proxy time and memory | `bash scripts/profile_proxies.sh --set dataset.root=/datasets` | `runs/profile/profile.json` |
+| JATST | `bash scripts/jatst_snasnet.sh --set dataset.root=/datasets` | `search.jsonl`, `best.json` |
+| Final architecture training | `lnas train ... --architecture <best.json>` | `best.pt`, `training.json` |
+
+Exact protocols, configuration overrides, output schemas, and the mapping from every paper table/figure to commands are in [docs/experiments.md](docs/experiments.md).
+
+## LLE configuration
 
 | Key | Meaning |
 |---|---|
-| `seed` | Global initialization and sampling seed |
-| `device` | `auto`, `cpu`, `cuda`, or a device such as `cuda:1` |
-| `dataset.timesteps` | Number of SNN simulation steps |
-| `dataset.image_size` | Spatial size produced by the loader |
-| `model.search_space` | One of the five registered search spaces |
-| `model.width` | Base CNN width or default AutoST embedding dimension |
-| `model.tau` | LIF membrane time constant |
-| `proxy.batches` | Number of cached minibatches used per candidate |
-| `proxy.max_outputs` | Output directions used by the LLE Jacobian estimator |
-| `proxy.stable_only` | Penalize positive finite-time exponents |
-| `search.candidates` | Total architecture evaluation budget |
-| `search.timestep_trials` | Bayesian-optimization evaluations per architecture |
+| `proxy.probes` | Number of independently initialized tangent directions |
+| `proxy.warmup_steps` | State transitions completed before tangent propagation |
+| `proxy.epsilon` | Lower clamp for tangent norms before logarithms |
+| `proxy.batches` | Cached minibatches evaluated for each candidate |
+| `proxy.repeats` | Repeated proxy evaluations averaged per candidate |
+| `search.candidates` | Total candidate or architecture--timestep evaluation budget |
+| `search.timesteps` | Explicit timestep choices used by JATST |
 
-Any key can be overridden repeatedly with `--set key=value`. Unknown keys fail immediately instead of being silently ignored.
+The reported ranking score is `-abs(raw_value)`, where `raw_value` is the maximum directional finite-time growth estimate over the configured probes. Both values and estimator diagnostics are preserved in result files.
 
-## LLE implementation note
+## Repository layout
 
-The original research code constructed Jacobians with ambiguous batch/output axes and materialized large tensors before SVD. The refactored implementation defines the evaluated quantity explicitly:
-
-1. For each timestep, obtain the time-resolved class logits.
-2. Select up to `proxy.max_outputs` evenly spaced output directions.
-3. Differentiate each selected logit with respect to the input prefix ending at that timestep.
-4. Form the per-sample restricted Jacobian and compute its largest singular value with `torch.linalg.svdvals`.
-5. Compute the finite-time exponent as `log(sigma_max + epsilon) / (t + 1)` and average across samples and timesteps.
-
-The raw exponent is reported separately from the search score. With `stable_only: true`, a positive exponent receives a penalty; among non-positive values, candidates closer to zero rank higher. This makes the implemented ranking rule explicit and prevents a positive, unstable value from winning solely because it is numerically larger.
-
-This corrected estimator is not numerically identical to the legacy script. Published tables produced with the legacy code should be regenerated before the manuscript and repository are treated as a single reproducible release.
-
-## Architecture JSON formats
-
-SNASNet:
-
-```json
-{"matrix": [[0,3,0,3],[0,0,3,0],[3,0,0,3],[0,2,0,0]]}
+```text
+configs/experiments/    Experiment configurations
+docs/                   Reproduction protocols
+scripts/                Search, analysis, profiling, and training entry points
+src/lnas/analysis/      Perturbation-growth and resource measurements
+src/lnas/data/          Dataset registry and temporal input normalization
+src/lnas/models/        State-explicit SNNs and search-space builders
+src/lnas/proxies/       LLE, HD, SAHD, and FLOPs proxies
+src/lnas/search/        Architecture and joint architecture--timestep search
+tests/                  Configuration, model, proxy, and search tests
 ```
-
-AutoSNN:
-
-```json
-{"blocks": ["SRB_k5","max_pool_k2","SRB_k5","skip_connect","max_pool_k2","SRB_k3","SRB_k5","max_pool_k2"]}
-```
-
-AutoST:
-
-```json
-{"dimension": 256, "depth": 6, "heads": 8, "mlp_ratio": 4}
-```
-
-HC sets:
-
-```json
-{"name": "spiking-resnet18"}
-```
-
-## Tests and code quality
-
-```bash
-ruff check .
-pytest
-python -m compileall -q src tests
-```
-
-The test suite checks YAML overrides, all five model interfaces, all four proxies, and discrete JATST optimization.
-
-## Troubleshooting
-
-### CUDA out of memory during LLE scoring
-
-Reduce the batch size and number of output directions:
-
-```bash
---set dataset.batch_size=4 --set proxy.max_outputs=4
-```
-
-### Event dataset import error
-
-```bash
-pip install spikingjelly==0.0.0.0.12
-```
-
-### ImageNet cannot be downloaded
-
-ImageNet download is intentionally not automated. Place the standard `train/` and `val/` class directories under `<dataset.root>/imagenet/`.
-
-### Reproducibility differs across GPUs
-
-The package fixes Python, NumPy, and PyTorch seeds and disables cuDNN benchmarking. Some CUDA kernels may still vary by platform. Record `lnas doctor` output with each experiment.
-
-## Related implementations
-
-The search-space definitions were checked against the official AutoSNN, SNASNet, AutoST, and NASWOT repositories. See [THIRD_PARTY.md](THIRD_PARTY.md) for links and attribution.
 
 ## Citation
 
-The bibliographic record will be updated when the manuscript is published. Until then, use the metadata in [CITATION.cff](CITATION.cff).
+If this repository supports your work, cite the metadata in [CITATION.cff](CITATION.cff). Until the revised paper is publicly available, bibliographic fields marked as provisional should be checked before submission.
+
+## License
+
+Released under the [MIT License](LICENSE). Third-party code and datasets retain their original terms; see [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -73,6 +73,9 @@ class SearchCell(nn.Module):
                     self.edges[key] = _operation(
                         int(matrix[source][target]), channels, tau, threshold, alpha
                     )
+        self.state_keys = [
+            key for key, operation in self.edges.items() if isinstance(operation, SpikeConvOp)
+        ]
 
     def step(
         self,
@@ -128,21 +131,48 @@ class SNASNet(TemporalClassifier):
         self.head = nn.Linear(width * 2, classes)
         self.apply(initialize_module)
 
-    def forward_sequence(self, inputs: torch.Tensor) -> torch.Tensor:
-        if inputs.ndim != 5:
-            raise ValueError(f"SNASNet expects [B,T,C,H,W], received {tuple(inputs.shape)}")
-        cell1_nodes = None
-        cell2_nodes = None
-        cell1_states: Dict[str, torch.Tensor] = {}
-        cell2_states: Dict[str, torch.Tensor] = {}
-        down_state = None
-        final_state = None
-        outputs = []
-        for frame in inputs.unbind(dim=1):
-            value = self.stem(frame)
-            value, cell1_nodes, cell1_states = self.cell1.step(value, cell1_nodes, cell1_states)
-            value, down_state = self.down.step(value, down_state)
-            value, cell2_nodes, cell2_states = self.cell2.step(value, cell2_nodes, cell2_states)
-            value, final_state = self.final_neuron(value, final_state)
-            outputs.append(self.head(self.pool(value).flatten(1)))
-        return torch.stack(outputs, dim=1)
+    def step(
+        self, frame: torch.Tensor, state: Tuple[torch.Tensor, ...] | None
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
+        count1 = len(self.cell1.state_keys)
+        count2 = len(self.cell2.state_keys)
+        if state is None:
+            cell1_nodes = None
+            cell1_states: Dict[str, torch.Tensor] = {}
+            down_state = None
+            cell2_nodes = None
+            cell2_states: Dict[str, torch.Tensor] = {}
+            final_state = None
+        else:
+            offset = 0
+            cell1_nodes = list(state[offset : offset + 4])
+            offset += 4
+            cell1_states = dict(zip(self.cell1.state_keys, state[offset : offset + count1]))
+            offset += count1
+            down_state = state[offset]
+            offset += 1
+            cell2_nodes = list(state[offset : offset + 4])
+            offset += 4
+            cell2_states = dict(zip(self.cell2.state_keys, state[offset : offset + count2]))
+            offset += count2
+            final_state = state[offset]
+
+        value = self.stem(frame)
+        value, cell1_nodes, cell1_states = self.cell1.step(
+            value, cell1_nodes, cell1_states
+        )
+        value, down_state = self.down.step(value, down_state)
+        value, cell2_nodes, cell2_states = self.cell2.step(
+            value, cell2_nodes, cell2_states
+        )
+        value, final_state = self.final_neuron(value, final_state)
+        output = self.head(self.pool(value).flatten(1))
+        next_state = (
+            *cell1_nodes,
+            *(cell1_states[key] for key in self.cell1.state_keys),
+            down_state,
+            *cell2_nodes,
+            *(cell2_states[key] for key in self.cell2.state_keys),
+            final_state,
+        )
+        return output, next_state

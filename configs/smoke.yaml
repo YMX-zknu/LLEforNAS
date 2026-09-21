@@ -20,15 +20,13 @@ proxy:
   name: lle
   batches: 1
   repeats: 1
-  max_outputs: 4
+  probes: 1
+  warmup_steps: 1
   epsilon: 1.0e-8
-  stable_only: true
 search:
   method: random
   candidates: 3
-  timestep_min: 2
-  timestep_max: 6
-  timestep_trials: 3
+  timesteps: [2, 4, 6]
 training:
   epochs: 1
   learning_rate: 0.01

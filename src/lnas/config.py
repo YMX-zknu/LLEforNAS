@@ -34,18 +34,19 @@ class ProxyConfig:
     name: str = "lle"
     batches: int = 1
     repeats: int = 1
-    max_outputs: int = 10
+    probes: int = 1
+    warmup_steps: int = 1
     epsilon: float = 1e-8
-    stable_only: bool = True
 
 
 @dataclass
 class SearchConfig:
     method: str = "random"
     candidates: int = 1000
-    timestep_min: int = 2
-    timestep_max: int = 14
-    timestep_trials: int = 5
+    timesteps: List[int] = None
+
+    def __post_init__(self) -> None:
+        self.timesteps = self.timesteps or list(range(2, 15, 2))
 
 
 @dataclass
@@ -148,7 +149,9 @@ def validate_config(config: ExperimentConfig) -> None:
         raise ValueError("dataset.image_size must be at least 8")
     if config.model.tau <= 1.0:
         raise ValueError("model.tau must be greater than 1")
-    if config.search.timestep_min > config.search.timestep_max:
-        raise ValueError("search timestep range is invalid")
-    if config.proxy.max_outputs < 1:
-        raise ValueError("proxy.max_outputs must be positive")
+    if config.proxy.probes < 1:
+        raise ValueError("proxy.probes must be positive")
+    if config.proxy.warmup_steps < 1:
+        raise ValueError("proxy.warmup_steps must be positive")
+    if not config.search.timesteps or any(value < 2 for value in config.search.timesteps):
+        raise ValueError("search.timesteps must contain integers greater than one")

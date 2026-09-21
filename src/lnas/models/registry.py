@@ -8,6 +8,7 @@ from lnas.data import DatasetSpec
 from .autosnn import AutoSNN
 from .autost import AutoST
 from .handcrafted import HandcraftedSNN
+from .sew_resnet import SEWResNet
 from .snasnet import SNASNet
 
 DEFAULT_SNASNET = [
@@ -90,11 +91,8 @@ def build_model(config: ModelConfig, spec: DatasetSpec, architecture: Dict[str, 
         name = architecture.get("name", "spiking-resnet18")
         if name not in HC_SNN_DEPTHS:
             raise ValueError(f"Unknown HC-SNN architecture: {name}")
-        return HandcraftedSNN(
-            width=config.width,
-            stage_depths=HC_SNN_DEPTHS[name],
-            **common,
-        )
+        model_class = SEWResNet if name.startswith("sew-") else HandcraftedSNN
+        return model_class(width=config.width, stage_depths=HC_SNN_DEPTHS[name], **common)
     if space == "hc-st":
         name = architecture.get("name", "spikformer")
         if name not in HC_ST_CONFIGS:

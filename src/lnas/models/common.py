@@ -66,8 +66,20 @@ class SpikingConvBlock(nn.Module):
 
 
 class TemporalClassifier(nn.Module):
-    def forward_sequence(self, inputs: torch.Tensor) -> torch.Tensor:
+    def step(
+        self, frame: torch.Tensor, state: Tuple[torch.Tensor, ...] | None
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
         raise NotImplementedError
+
+    def forward_sequence(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.ndim != 5:
+            raise ValueError(f"Expected [B,T,C,H,W], received {tuple(inputs.shape)}")
+        state = None
+        outputs = []
+        for frame in inputs.unbind(dim=1):
+            output, state = self.step(frame, state)
+            outputs.append(output)
+        return torch.stack(outputs, dim=1)
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.forward_sequence(inputs).mean(dim=1)
