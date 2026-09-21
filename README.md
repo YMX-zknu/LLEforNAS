@@ -1,5 +1,8 @@
 # L-NAS
 
+[![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Official implementation of **L-NAS: Lyapunov-Inspired Zero-Cost Proxy for Efficient Spiking Neural Architecture Search**.
 
 L-NAS evaluates untrained spiking neural networks with a finite-time Lyapunov-inspired score and supports joint architecture-timestep search (JATST). The repository provides one configuration system and one command-line interface for the five search spaces used in the manuscript:

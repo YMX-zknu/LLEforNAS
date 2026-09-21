@@ -7,6 +7,7 @@ name = "l-nas"
 version = "1.0.0"
 description = "Lyapunov-inspired zero-cost proxy and joint architecture-timestep search for SNNs"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.9,<3.12"
 authors = [
   {name = "Mingxuan Yang"},
