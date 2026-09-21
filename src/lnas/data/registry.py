@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict
 
 import torch
-import torch.nn.functional as functional
 from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 
 from lnas.config import DatasetConfig
