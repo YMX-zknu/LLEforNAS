@@ -2,7 +2,7 @@ import torch
 
 from lnas.ftle import estimate_ftle
 from lnas.models.autost import AutoST
-from lnas.models.snasnet import SNASNet
+from lnas.models.snasnet import SearchCell, SNASNet
 from lnas.spaces import SNASNetSpace
 
 
@@ -14,6 +14,18 @@ def test_snasnet_state_is_explicit():
         output2, state2 = model.step(torch.randn(1, 2, 8, 8), state)
     assert output.shape == output2.shape == (1, 10)
     assert len(state) == len(state2)
+
+
+def test_snasnet_feedback_uses_previous_timestep():
+    matrix = [[0] * 4 for _ in range(4)]
+    for source, target in ((0, 1), (1, 2), (2, 3), (0, 3), (3, 1)):
+        matrix[source][target] = 1
+    cell = SearchCell(2, matrix, 2, 1, 2)
+    frame = torch.ones(1, 2, 4, 4)
+    first, feedback, states = cell.step(frame, None, {})
+    second, _, _ = cell.step(frame, feedback, states)
+    assert torch.equal(first, 2 * frame)
+    assert torch.equal(second, 4 * frame)
 
 
 def test_autost_state_is_explicit():

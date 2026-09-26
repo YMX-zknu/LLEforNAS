@@ -3,7 +3,7 @@
 [![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository contains the implementation code for the paper **“L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search”**. It provides the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST), with a convolutional SNASNet search-space adapter and a spiking Transformer AutoST search-space adapter.
+This repository contains the implementation code for the paper **“L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search”**. It provides the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST), with a convolutional SNASNet search-space adapter and a spiking Transformer AutoST tiny search-space adapter.
 
 ## What the repository does
 
@@ -92,7 +92,7 @@ result = estimate_ftle(model, frames, k=8, warmup=1, epsilon=1e-8)
 print(result.estimate, result.eligible, result.score)
 ```
 
-Each search space uses the architecture variables described by its source project. AutoST samples embedding dimension and depth together with per-block attention head counts and MLP ratios. The local state-explicit models are **compact reference adapters** so that the proxy and JATST can be exercised without a separate training framework. They are not checkpoint-compatible reproductions of the upstream full backbones. The AutoST adapter uses spiking attention without softmax, and the SNASNet adapter includes forward and feedback cell connections. Consult [THIRD_PARTY.md](THIRD_PARTY.md) for source projects.
+SNASNet candidates use the source project's backward-cell encoding: each node pair has at most one directed edge, the direct input-to-output edge is present, and disconnected intermediate nodes are removed. The cell carries delayed feedback across timesteps. AutoST follows the upstream **tiny** search-space configuration, sampling embedding dimension and depth together with per-block attention head counts and MLP ratios. The local state-explicit models are **compact reference adapters** so that the proxy and JATST can be exercised without a separate training framework. They are not checkpoint-compatible reproductions of the upstream full backbones. The AutoST adapter uses spiking attention without softmax; its simplified patch stem and blocks differ from the upstream full model. Consult [THIRD_PARTY.md](THIRD_PARTY.md) for source projects.
 
 The supplied article source `NN-subsssss(2).tex` specifies K=1; **this repository uses the requested K=8**. Numerical scores, rankings, selected architectures, and published results must be rechecked under K=8 before they can be attributed to this implementation.
 

@@ -10,29 +10,64 @@ import random
 class SNASNetSpace:
     name = "snasnet"
 
+    @staticmethod
+    def _path(matrix: list[list[int]], start: int, goal: int) -> bool:
+        visited = {start}
+        pending = [start]
+        while pending:
+            source = pending.pop()
+            if source == goal:
+                return True
+            for target, operation in enumerate(matrix[source]):
+                if operation and target not in visited:
+                    visited.add(target)
+                    pending.append(target)
+        return False
+
+    @classmethod
+    def _prune(cls, matrix: list[list[int]]) -> list[list[int]]:
+        for node in (1, 2):
+            if not cls._path(matrix, 0, node) or not cls._path(matrix, node, 3):
+                for neighbor in range(4):
+                    matrix[node][neighbor] = 0
+                    matrix[neighbor][node] = 0
+        return matrix
+
     def sample(self, rng: random.Random) -> dict:
-        matrix = [
-            [0 if i == j else rng.randrange(5) for j in range(4)]
-            for i in range(4)
-        ]
-        matrix[0][3] = rng.randrange(1, 5)
-        return {"matrix": matrix}
+        while True:
+            matrix = [[0] * 4 for _ in range(4)]
+            for source in range(4):
+                for target in range(source + 1, 4):
+                    if rng.randrange(2):
+                        matrix[source][target] = rng.randrange(5)
+                    else:
+                        matrix[target][source] = rng.randrange(5)
+            if matrix[0][3]:
+                return {"matrix": self._prune(matrix)}
 
     def mutate(self, architecture: dict, rng: random.Random) -> dict:
         child = copy.deepcopy(architecture)
-        i, j = rng.choice([(i, j) for i in range(4) for j in range(4) if i != j])
-        choices = list(range(1, 5)) if (i, j) == (0, 3) else list(range(5))
-        child["matrix"][i][j] = rng.choice(
-            [value for value in choices if value != child["matrix"][i][j]]
-        )
+        source, target = rng.choice([
+            (i, j) for i in range(4) for j in range(i + 1, 4)
+        ])
+        options = [(value, 0) for value in range(1, 5)]
+        if (source, target) != (0, 3):
+            options += [(0, 0)] + [(0, value) for value in range(1, 5)]
+        old = (child["matrix"][source][target], child["matrix"][target][source])
+        forward, backward = rng.choice([pair for pair in options if pair != old])
+        child["matrix"][source][target] = forward
+        child["matrix"][target][source] = backward
+        child["matrix"] = self._prune(child["matrix"])
         return child
 
     def crossover(self, first: dict, second: dict, rng: random.Random) -> dict:
-        matrix = [
-            [a if rng.random() < 0.5 else b for a, b in zip(row_a, row_b, strict=True)]
-            for row_a, row_b in zip(first["matrix"], second["matrix"], strict=True)
-        ]
-        return {"matrix": matrix}
+        matrix = [[0] * 4 for _ in range(4)]
+        for source in range(4):
+            for target in range(source + 1, 4):
+                parent = first if rng.random() < 0.5 else second
+                matrix[source][target] = parent["matrix"][source][target]
+                matrix[target][source] = parent["matrix"][target][source]
+        return {"matrix": self._prune(matrix)}
 
 
 class AutoSTSpace:

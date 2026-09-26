@@ -15,11 +15,12 @@ authors = [
   {name = "Michael Yu Wang"},
 ]
 dependencies = [
+  "numpy>=1.24,<2",
   "torch>=2.3,<2.6",
 ]
 
 [project.optional-dependencies]
-events = ["spikingjelly==0.0.0.0.12", "numpy<2"]
+events = ["spikingjelly==0.0.0.0.12"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]

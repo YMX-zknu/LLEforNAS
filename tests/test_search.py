@@ -41,6 +41,12 @@ def test_evolutionary_search_uses_one_evaluation_per_pair():
 
 def test_autost_operator_choices_follow_depth():
     space = AutoSTSpace()
+    assert space.choices == {
+        "dimension": (192, 256, 320, 384),
+        "depth": tuple(range(1, 11)),
+        "heads": (4, 8),
+        "mlp_ratio": (3, 4, 5),
+    }
     rng = random.Random(19)
     first = space.sample(rng)
     second = space.sample(rng)
@@ -48,3 +54,22 @@ def test_autost_operator_choices_follow_depth():
         assert len(architecture["heads"]) == architecture["depth"]
         assert len(architecture["mlp_ratio"]) == architecture["depth"]
         assert all(architecture["dimension"] % h == 0 for h in architecture["heads"])
+
+
+def test_snasnet_source_connection_constraints():
+    space = SNASNetSpace()
+    rng = random.Random(19)
+    first = space.sample(rng)
+    second = space.sample(rng)
+    candidates = [space.sample(rng) for _ in range(100)]
+    candidates.extend((first, space.mutate(first, rng), space.crossover(first, second, rng)))
+    for candidate in candidates:
+        matrix = candidate["matrix"]
+        assert matrix[0][3] in (1, 2, 3, 4)
+        assert all(not (matrix[i][j] and matrix[j][i])
+                   for i in range(4) for j in range(i + 1, 4))
+        for node in (1, 2):
+            active = any(matrix[node]) or any(row[node] for row in matrix)
+            if active:
+                assert space._path(matrix, 0, node)
+                assert space._path(matrix, node, 3)

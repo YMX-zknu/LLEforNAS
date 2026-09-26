@@ -68,6 +68,10 @@ class SearchCell(nn.Module):
             raise ValueError("SNASNet matrix diagonal must be zero")
         if any(matrix[i][j] not in range(5) for i in range(4) for j in range(4)):
             raise ValueError("SNASNet operation codes must be integers from 0 to 4")
+        if matrix[0][3] == 0:
+            raise ValueError("SNASNet requires a direct input-to-output connection")
+        if any(matrix[i][j] and matrix[j][i] for i in range(4) for j in range(i + 1, 4)):
+            raise ValueError("SNASNet allows at most one direction per node pair")
         self.matrix = matrix
         self.edges = nn.ModuleDict()
         for source in range(4):
@@ -84,32 +88,32 @@ class SearchCell(nn.Module):
     def step(
         self,
         inputs: torch.Tensor,
-        previous_nodes: List[torch.Tensor] | None,
+        previous_feedback: List[torch.Tensor] | None,
         edge_states: Dict[str, torch.Tensor],
     ) -> Tuple[torch.Tensor, List[torch.Tensor], Dict[str, torch.Tensor]]:
-        previous_nodes = previous_nodes or [torch.zeros_like(inputs) for _ in range(4)]
+        if previous_feedback is None:
+            previous_feedback = [torch.zeros_like(inputs) for _ in range(3)]
         new_states: Dict[str, torch.Tensor] = {}
-        recurrent_input = inputs
-        for source in range(1, 4):
-            key = f"{source}_0"
-            contribution, state = self.edges[key].step(previous_nodes[source], edge_states.get(key))
-            recurrent_input = recurrent_input + contribution
+
+        def apply(source: int, target: int, value: torch.Tensor) -> torch.Tensor:
+            key = f"{source}_{target}"
+            contribution, state = self.edges[key].step(value, edge_states.get(key))
             if state is not None:
                 new_states[key] = state
-        nodes = [recurrent_input]
-        for target in range(1, 4):
-            value = torch.zeros_like(inputs)
-            for source in range(4):
-                if source == target:
-                    continue
-                source_value = nodes[source] if source < target else previous_nodes[source]
-                key = f"{source}_{target}"
-                contribution, state = self.edges[key].step(source_value, edge_states.get(key))
-                value = value + contribution
-                if state is not None:
-                    new_states[key] = state
-            nodes.append(value)
-        return nodes[-1], nodes, new_states
+            return contribution
+
+        base = inputs + previous_feedback[0]
+        node1 = apply(0, 1, base)
+        delayed1 = node1 + previous_feedback[1]
+        node2 = apply(0, 2, base) + apply(1, 2, delayed1)
+        delayed2 = node2 + previous_feedback[2]
+        node3 = apply(0, 3, base) + apply(1, 3, delayed1) + apply(2, 3, delayed2)
+        feedback = [
+            apply(1, 0, delayed1) + apply(2, 0, delayed2) + apply(3, 0, node3),
+            apply(2, 1, delayed2) + apply(3, 1, node3),
+            apply(3, 2, node3),
+        ]
+        return node3, feedback, new_states
 
 
 class SNASNet(TemporalClassifier):
@@ -141,24 +145,24 @@ class SNASNet(TemporalClassifier):
         count1 = len(self.cell1.state_keys)
         count2 = len(self.cell2.state_keys)
         if state is None:
-            cell1_nodes = None
+            cell1_feedback = None
             cell1_states: Dict[str, torch.Tensor] = {}
             down_state = None
-            cell2_nodes = None
+            cell2_feedback = None
             cell2_states: Dict[str, torch.Tensor] = {}
             final_state = None
         else:
             offset = 0
-            cell1_nodes = list(state[offset : offset + 4])
-            offset += 4
+            cell1_feedback = list(state[offset : offset + 3])
+            offset += 3
             cell1_states = dict(
                 zip(self.cell1.state_keys, state[offset : offset + count1], strict=True)
             )
             offset += count1
             down_state = state[offset]
             offset += 1
-            cell2_nodes = list(state[offset : offset + 4])
-            offset += 4
+            cell2_feedback = list(state[offset : offset + 3])
+            offset += 3
             cell2_states = dict(
                 zip(self.cell2.state_keys, state[offset : offset + count2], strict=True)
             )
@@ -166,20 +170,20 @@ class SNASNet(TemporalClassifier):
             final_state = state[offset]
 
         value = self.stem(frame)
-        value, cell1_nodes, cell1_states = self.cell1.step(
-            value, cell1_nodes, cell1_states
+        value, cell1_feedback, cell1_states = self.cell1.step(
+            value, cell1_feedback, cell1_states
         )
         value, down_state = self.down.step(value, down_state)
-        value, cell2_nodes, cell2_states = self.cell2.step(
-            value, cell2_nodes, cell2_states
+        value, cell2_feedback, cell2_states = self.cell2.step(
+            value, cell2_feedback, cell2_states
         )
         value, final_state = self.final_neuron(value, final_state)
         output = self.head(self.pool(value).flatten(1))
         next_state = (
-            *cell1_nodes,
+            *cell1_feedback,
             *(cell1_states[key] for key in self.cell1.state_keys),
             down_state,
-            *cell2_nodes,
+            *cell2_feedback,
             *(cell2_states[key] for key in self.cell2.state_keys),
             final_state,
         )
