@@ -24,6 +24,9 @@ class ATanSpike(torch.autograd.Function):
 class LIFCell(nn.Module):
     def __init__(self, tau: float, threshold: float, alpha: float) -> None:
         super().__init__()
+        if tau <= 1:
+            raise ValueError("tau must be greater than one")
+        self.tau = tau
         self.decay = 1.0 - 1.0 / tau
         self.threshold = threshold
         self.alpha = alpha
@@ -33,9 +36,9 @@ class LIFCell(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if membrane is None:
             membrane = torch.zeros_like(current)
-        membrane = membrane * self.decay + current
+        membrane = membrane * self.decay + current / self.tau
         spike = ATanSpike.apply(membrane - self.threshold, self.alpha)
-        membrane = membrane - spike.detach() * self.threshold
+        membrane = membrane * (1.0 - spike.detach())
         return spike, membrane
 
 

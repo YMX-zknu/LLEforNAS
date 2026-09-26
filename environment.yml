@@ -6,12 +6,7 @@ channels:
 dependencies:
   - python=3.10
   - pytorch=2.3.1
-  - torchvision=0.18.1
   - pytorch-cuda=12.1
-  - numpy=1.26
-  - pyyaml=6
-  - tqdm
   - pip
   - pip:
-      - spikingjelly==0.0.0.0.12
-      - -e .[analysis,dev]
+      - -e .[events,dev]

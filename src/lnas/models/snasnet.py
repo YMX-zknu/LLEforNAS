@@ -64,6 +64,10 @@ class SearchCell(nn.Module):
         super().__init__()
         if len(matrix) != 4 or any(len(row) != 4 for row in matrix):
             raise ValueError("SNASNet connection matrix must be 4x4")
+        if any(matrix[i][i] != 0 for i in range(4)):
+            raise ValueError("SNASNet matrix diagonal must be zero")
+        if any(matrix[i][j] not in range(5) for i in range(4) for j in range(4)):
+            raise ValueError("SNASNet operation codes must be integers from 0 to 4")
         self.matrix = matrix
         self.edges = nn.ModuleDict()
         for source in range(4):
@@ -147,13 +151,17 @@ class SNASNet(TemporalClassifier):
             offset = 0
             cell1_nodes = list(state[offset : offset + 4])
             offset += 4
-            cell1_states = dict(zip(self.cell1.state_keys, state[offset : offset + count1]))
+            cell1_states = dict(
+                zip(self.cell1.state_keys, state[offset : offset + count1], strict=True)
+            )
             offset += count1
             down_state = state[offset]
             offset += 1
             cell2_nodes = list(state[offset : offset + 4])
             offset += 4
-            cell2_states = dict(zip(self.cell2.state_keys, state[offset : offset + count2]))
+            cell2_states = dict(
+                zip(self.cell2.state_keys, state[offset : offset + count2], strict=True)
+            )
             offset += count2
             final_state = state[offset]
 

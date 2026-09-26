@@ -1,274 +1,132 @@
+"""Small command-line interface for FTLE scoring and search."""
+
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
-import platform
-from dataclasses import replace
+import random
 from pathlib import Path
-from typing import Any, Dict
 
 import torch
 
-from lnas.analysis import finite_perturbation_growth, profile_proxy
-from lnas.config import ExperimentConfig, load_config
-from lnas.data import SPECS, build_datasets, build_loaders
-from lnas.engine import collect_batches, evaluate_architecture, train_model
-from lnas.models import build_model
-from lnas.proxies import build_proxy
-from lnas.runtime import atomic_json, resolve_device, seed_everything
-from lnas.search import run_jatst, run_search
-from lnas.search.spaces import get_search_space
+from .data import EvaluationBatch
+from .ftle import estimate_ftle
+from .models.autost import AutoST
+from .models.snasnet import SNASNet
+from .search import run_jatst
+from .spaces import get_space
 
 
-def _architecture(path: str | None, fallback: Dict[str, Any] | None) -> Dict[str, Any]:
-    if path is None:
-        return fallback or {}
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    if "architecture" in data:
-        data = data["architecture"]
-    if not isinstance(data, dict):
-        raise ValueError("Architecture JSON must contain an object")
-    return data
-
-
-def _write_search(output_dir: str, records) -> None:
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    lines = "\n".join(json.dumps(item.to_dict(), sort_keys=True) for item in records) + "\n"
-    (output / "search.jsonl").write_text(lines, encoding="utf-8")
-    atomic_json(output / "best.json", records[0].to_dict())
-
-
-def _load(args) -> ExperimentConfig:
-    return load_config(args.config, args.set)
-
-
-def command_score(args) -> None:
-    config = _load(args)
-    seed_everything(config.seed)
-    device = resolve_device(config.device)
-    bundle = build_datasets(config.dataset, config.seed)
-    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
-    batches = collect_batches(
-        train_loader,
-        config.proxy.batches,
-        bundle.spec,
-        config.dataset.timesteps,
-        device,
+def _model(space: str, architecture: dict, width: int, tau: float) -> torch.nn.Module:
+    common = dict(channels=2, classes=10, tau=tau, threshold=1.0, alpha=2.0)
+    if space == "snasnet":
+        return SNASNet(width=width, matrix=architecture["matrix"], **common)
+    return AutoST(
+        dimension=architecture["dimension"], depth=architecture["depth"],
+        heads=architecture["heads"], mlp_ratio=architecture["mlp_ratio"], **common,
     )
-    architecture = _architecture(args.architecture, config.model.architecture)
-    record = evaluate_architecture(config, bundle.spec, architecture, batches, device)
-    atomic_json(Path(config.output_dir) / "score.json", record.to_dict())
-    print(json.dumps(record.to_dict(), indent=2, sort_keys=True))
 
 
-def command_search(args) -> None:
-    config = _load(args)
-    seed_everything(config.seed)
-    device = resolve_device(config.device)
-    bundle = build_datasets(config.dataset, config.seed)
-    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
-    batches = collect_batches(
-        train_loader,
-        config.proxy.batches,
-        bundle.spec,
-        config.dataset.timesteps,
-        device,
-    )
-    space = get_search_space(config.model.search_space)
-
-    def evaluate(architecture):
-        record = evaluate_architecture(config, bundle.spec, architecture, batches, device)
-        print(f"score={record.score:.6f} architecture={json.dumps(architecture, sort_keys=True)}")
-        return record
-
-    records = run_search(
-        space, evaluate, config.search.candidates, config.search.method, config.seed
-    )
-    _write_search(config.output_dir, records)
-    print(json.dumps(records[0].to_dict(), indent=2, sort_keys=True))
-
-
-def command_jatst(args) -> None:
-    config = _load(args)
-    seed_everything(config.seed)
-    device = resolve_device(config.device)
-    space = get_search_space(config.model.search_space)
-    cache = {}
-
-    def batches_for(timestep):
-        if timestep not in cache:
-            dataset_config = replace(config.dataset, timesteps=timestep)
-            bundle = build_datasets(dataset_config, config.seed)
-            train_loader, _ = build_loaders(bundle, dataset_config, config.seed)
-            batches = collect_batches(
-                train_loader, config.proxy.batches, bundle.spec, timestep, device
-            )
-            cache[timestep] = bundle.spec, batches
-        return cache[timestep]
-
-    def evaluate(architecture, timestep):
-        spec, batches = batches_for(timestep)
-        timestep_config = replace(config, dataset=replace(config.dataset, timesteps=timestep))
-        record = evaluate_architecture(timestep_config, spec, architecture, batches, device)
-        print(f"timestep={timestep:02d} score={record.score:.6f}")
-        return record
-
-    records = run_jatst(
-        space,
-        evaluate,
-        config.search.candidates,
-        config.search.timesteps,
-        config.search.method,
-        config.seed,
-    )
-    _write_search(config.output_dir, records)
-    print(json.dumps(records[0].to_dict(), indent=2, sort_keys=True))
-
-
-def command_train(args) -> None:
-    config = _load(args)
-    seed_everything(config.seed)
-    device = resolve_device(config.device)
-    bundle = build_datasets(config.dataset, config.seed)
-    train_loader, test_loader = build_loaders(bundle, config.dataset, config.seed)
-    architecture = _architecture(args.architecture, config.model.architecture)
-    model = build_model(config.model, bundle.spec, architecture).to(device)
-    train_model(model, train_loader, test_loader, bundle.spec, config, architecture, device)
-
-
-def command_perturbation(args) -> None:
-    config = _load(args)
-    device = resolve_device(config.device)
-    bundle = build_datasets(config.dataset, config.seed)
-    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
-    inputs = collect_batches(
-        train_loader, 1, bundle.spec, config.dataset.timesteps, device
-    )[0]
-    results = {}
-    for tau in args.taus:
-        runs = []
-        for offset in range(args.seeds):
-            seed_everything(config.seed + offset)
-            model_config = replace(config.model, search_space="hc-snn", tau=tau)
-            model = build_model(model_config, bundle.spec, {"name": "sew-resnet18"}).to(device)
-            measurement = finite_perturbation_growth(
-                model,
-                inputs,
-                epsilon=args.epsilon,
-                directions=args.directions,
-                warmup_steps=config.proxy.warmup_steps,
-            )
-            measurement["seed"] = config.seed + offset
-            runs.append(measurement)
-        results[str(tau)] = runs
-    payload = {
-        "architecture": "sew-resnet18",
-        "dataset": config.dataset.name,
-        "timesteps": config.dataset.timesteps,
-        "epsilon": args.epsilon,
-        "directions": args.directions,
-        "runs": results,
-    }
-    path = Path(config.output_dir) / "perturbation.json"
-    atomic_json(path, payload)
-    print(json.dumps(payload, indent=2, sort_keys=True))
-
-
-def command_profile(args) -> None:
-    config = _load(args)
-    seed_everything(config.seed)
-    device = resolve_device(config.device)
-    bundle = build_datasets(config.dataset, config.seed)
-    train_loader, _ = build_loaders(bundle, config.dataset, config.seed)
-    inputs = collect_batches(
-        train_loader, 1, bundle.spec, config.dataset.timesteps, device
-    )[0]
-    architecture = _architecture(args.architecture, config.model.architecture)
-    model = build_model(config.model, bundle.spec, architecture).to(device).eval()
-    results = {}
-    for name in args.proxies:
-        proxy = build_proxy(replace(config.proxy, name=name))
-        results[name] = profile_proxy(proxy, model, inputs, args.repeats, args.warmup)
-    payload = {
-        "architecture": architecture,
-        "dataset": config.dataset.name,
-        "batch_size": int(inputs.shape[0]),
-        "timesteps": int(inputs.shape[1]),
-        "device": str(device),
-        "results": results,
-    }
-    path = Path(config.output_dir) / "profile.json"
-    atomic_json(path, payload)
-    print(json.dumps(payload, indent=2, sort_keys=True))
-
-
-def command_doctor(_args) -> None:
-    packages = ["torch", "torchvision", "numpy", "yaml", "spikingjelly"]
-    report = {
-        "python": platform.python_version(),
-        "cuda_available": torch.cuda.is_available(),
-        "cuda_version": torch.version.cuda,
-        "packages": {},
-    }
-    for name in packages:
-        try:
-            module = importlib.import_module(name)
-            report["packages"][name] = getattr(module, "__version__", "installed")
-        except ImportError:
-            report["packages"][name] = None
-    print(json.dumps(report, indent=2, sort_keys=True))
-
-
-def command_list(_args) -> None:
-    print("datasets: " + ", ".join(sorted(SPECS)))
-    print("search spaces: snasnet, autosnn, autost, hc-snn, hc-st")
-    print("proxies: lle, hd, sahd, flops")
-    print("search methods: random, evolution")
-    print("commands: score, search, jatst, train, perturbation, profile")
-
-
-def _configured(subparsers, name, function, architecture=False):
-    parser = subparsers.add_parser(name)
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
-    if architecture:
-        parser.add_argument("--architecture")
-    parser.set_defaults(function=function)
+def _load_architecture(path: str) -> dict:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if "best" in payload:
+        payload = payload["best"]
+    if payload is None:
+        raise ValueError("search selected no eligible candidate; best is null")
+    if "architecture" in payload:
+        payload = payload["architecture"]
+    if not isinstance(payload, dict):
+        raise ValueError("architecture JSON must contain an architecture object")
+    return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lnas")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    doctor = subparsers.add_parser("doctor")
-    doctor.set_defaults(function=command_doctor)
-    listing = subparsers.add_parser("list")
-    listing.set_defaults(function=command_list)
-    _configured(subparsers, "score", command_score, architecture=True)
-    _configured(subparsers, "search", command_search)
-    _configured(subparsers, "jatst", command_jatst)
-    _configured(subparsers, "train", command_train, architecture=True)
-    perturbation = subparsers.add_parser("perturbation")
-    perturbation.add_argument("--config", required=True)
-    perturbation.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
-    perturbation.add_argument("--taus", type=float, nargs="+", default=[1.5, 2.0, 2.5, 3.0])
-    perturbation.add_argument("--epsilon", type=float, default=1e-3)
-    perturbation.add_argument("--directions", type=int, default=3)
-    perturbation.add_argument("--seeds", type=int, default=5)
-    perturbation.set_defaults(function=command_perturbation)
-    profile = subparsers.add_parser("profile")
-    profile.add_argument("--config", required=True)
-    profile.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
-    profile.add_argument("--architecture")
-    profile.add_argument("--proxies", nargs="+", default=["hd", "sahd", "flops", "lle"])
-    profile.add_argument("--repeats", type=int, default=5)
-    profile.add_argument("--warmup", type=int, default=1)
-    profile.set_defaults(function=command_profile)
+    parser.add_argument("command", choices=("score", "search", "jatst"))
+    parser.add_argument("--space", choices=("snasnet", "autost"), required=True)
+    parser.add_argument("--dataset", choices=("synthetic", "cifar10dvs"), default="synthetic")
+    parser.add_argument("--data-root", default="data")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--image-size", type=int, default=32)
+    parser.add_argument("--timesteps", type=int, nargs="+", default=[4])
+    parser.add_argument("--budget", type=int, default=3)
+    parser.add_argument("--method", choices=("random", "evolution"), default="random")
+    parser.add_argument("--seed", type=int, default=2025)
+    parser.add_argument("--probes", type=int, default=8, help="K random tangent directions")
+    parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument("--epsilon", type=float, default=1e-8)
+    parser.add_argument("--width", type=int, default=16, help="SNASNet adapter width")
+    parser.add_argument("--tau", type=float, default=None)
+    parser.add_argument("--architecture", help="architecture JSON for 'score'")
+    parser.add_argument("--output", default="runs/ftle-search")
     return parser
 
 
-def main() -> None:
-    parser = build_parser()
-    arguments = parser.parse_args()
-    arguments.function(arguments)
+def main(argv: list[str] | None = None) -> None:
+    args = build_parser().parse_args(argv)
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is unavailable")
+    if args.command in {"score", "search"} and len(args.timesteps) != 1:
+        raise ValueError("score and search require exactly one timestep count")
+    if args.command == "score" and not args.architecture:
+        raise ValueError("score requires --architecture")
+    torch.set_num_threads(min(4, torch.get_num_threads()))
+    tau = args.tau if args.tau is not None else (4 / 3 if args.space == "snasnet" else 2.0)
+    space = get_space(args.space)
+    batch = EvaluationBatch(
+        args.dataset, args.data_root, args.batch_size, args.image_size,
+        max(args.timesteps), args.seed, device,
+    )
+
+    def evaluate(architecture: dict, timestep: int):
+        random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if device.type == "cuda":
+            torch.cuda.manual_seed_all(args.seed)
+        model = _model(args.space, architecture, args.width, tau).to(device).eval()
+        result = estimate_ftle(
+            model, batch.get(timestep), k=args.probes,
+            warmup=args.warmup, epsilon=args.epsilon,
+        )
+        del model
+        return result
+
+    if args.command == "score":
+        architecture = _load_architecture(args.architecture)
+        payload = {
+            "space": args.space, "architecture": architecture,
+            "ftle": evaluate(architecture, args.timesteps[0]).to_dict(),
+        }
+        print(json.dumps(payload, indent=2, allow_nan=False))
+        return
+
+    values = tuple(args.timesteps)
+    result = run_jatst(
+        space, evaluate, timesteps=values, budget=args.budget,
+        method=args.method, seed=args.seed,
+    )
+    destination = Path(args.output)
+    destination.mkdir(parents=True, exist_ok=True)
+    with (destination / "search.jsonl").open("w", encoding="utf-8") as output:
+        for record in result.records:
+            output.write(json.dumps(record.to_dict(), allow_nan=False) + "\n")
+    best = result.best.to_dict() if result.best is not None else None
+    summary = {
+        "space": args.space, "method": args.method, "dataset": args.dataset,
+        "seed": args.seed, "probes": args.probes, "evaluations": len(result.records),
+        "feasible": sum(record.result.eligible for record in result.records),
+        "best": best,
+    }
+    (destination / "best.json").write_text(
+        json.dumps(summary, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
+    print(json.dumps(summary, indent=2, allow_nan=False))
+
+
+if __name__ == "__main__":
+    main()

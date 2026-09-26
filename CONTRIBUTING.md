@@ -8,4 +8,4 @@ pytest
 python -m compileall -q src tests
 ```
 
-Keep the public tensor contract batch-first: `[B, T, C, H, W]`. New datasets and search spaces must be registered through their registries rather than added to command-specific conditionals.
+Keep the public tensor contract batch-first: `[B, T, C, H, W]`. Models passed to `estimate_ftle` must implement `step(frame, state)` and return their recurrent state as a tuple of tensors. Check proxy-score semantics against the paper before modifying the search code.

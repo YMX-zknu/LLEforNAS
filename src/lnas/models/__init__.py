@@ -1,3 +1,4 @@
-from .registry import build_model
+from .autost import AutoST
+from .snasnet import SNASNet
 
-__all__ = ["build_model"]
+__all__ = ["AutoST", "SNASNet"]

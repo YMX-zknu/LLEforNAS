@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite the L-NAS manuscript."
-title: "L-NAS: A Lyapunov-Inspired Training-Free Proxy for Efficient Spiking Neural Architecture Search"
+title: "L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search"
 type: software
-version: 1.0.0
+version: 1.1.0
 authors:
   - family-names: Yang
     given-names: Mingxuan

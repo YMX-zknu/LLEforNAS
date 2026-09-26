@@ -1,187 +1,107 @@
-# L-NAS
+# L-NAS: training-free spiking architecture search
 
 [![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Official implementation of **L-NAS: A Lyapunov-Inspired Training-Free Proxy for Efficient Spiking Neural Architecture Search**.
+An implementation of the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST). This focused repository includes a convolutional SNASNet search-space adapter and a spiking Transformer AutoST search-space adapter.
 
-L-NAS ranks an untrained spiking neural network by matrix-free finite-time hidden-state perturbation growth. The implementation propagates random tangent vectors with Jacobian--vector products (JVPs), renormalizes them after every timestep, and accumulates logarithmic growth in FP64. It does not construct a full Jacobian, multiply Jacobian matrices, or perform an explicit SVD. In this repository, *zero-cost* means *training-free scoring at initialization*; runtime and memory are measured costs rather than zero.
+## What the repository does
 
-The same configuration and `[batch, time, channel, height, width]` tensor convention are used for all supported datasets and search spaces. Dataset metadata supplies input channels, classes, image size, and static-to-temporal conversion, so changing spaces does not require source edits.
+The FTLE proxy evaluates an untrained network on one fixed mini-batch. At each timestep, it propagates **eight independently initialized tangent vectors** with Jacobian-vector products, normalizes them, and accumulates their logarithmic growth. The maximum of the eight directional estimates is the raw FTLE estimate. Candidates are eligible for selection only if that estimate is **negative**; among eligible candidates, the estimate closest to zero ranks highest. No full Jacobian, Jacobian product, or SVD is constructed.
 
-## Supported search spaces
+The estimator is a finite-direction approximation to the maximum finite-time growth rate, not an exact SVD. The reported proxy score is `null` when the estimate is nonnegative. JATST then selects no architecture if its entire evaluation budget produces no eligible candidate. A search evaluation does **not** train candidate weights; full final-model training is beyond this compact demonstration.
 
-| Family | Manuscript name | Configuration value |
-|---|---|---|
-| Automatically designed CNN | SNASNet | `snasnet` |
-| Automatically designed CNN | AutoSNN | `autosnn` |
-| Automatically designed transformer | AutoST | `autost` |
-| Hand-crafted CNN set | HC-SNN Set | `hc-snn` |
-| Hand-crafted transformer set | HC-ST Set | `hc-st` |
+## Requirements
 
-## Installation
-
-Python 3.10 is recommended; CI checks Python 3.9--3.12.
+- Python 3.10 or 3.11; PyTorch 2.3.1 is the development reference.
+- CPU for small synthetic examples; a CUDA GPU is recommended for event-data search.
+- SpikingJelly 0.0.0.0.12 and locally prepared CIFAR10-DVS frames for real event data.
 
 ```bash
 git clone https://github.com/YMX-zknu/LLEforNAS.git
 cd LLEforNAS
-conda env create -f environment.yml
-conda activate lnas
-```
-
-To install into an existing PyTorch environment:
-
-```bash
+python -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e .[events,analysis]
+pip install -e '.[dev]'
 ```
 
-For development and tests:
+For CIFAR10-DVS, install the optional dataset support with `pip install -e '.[events,dev]'`. On an A100 CUDA 12.1 machine, the tested environment is specified in `environment.yml` and can be created with `conda env create -f environment.yml` followed by `conda activate lnas`.
+
+## Quick start without downloads
+
+The following commands build untrained networks and use a deterministic synthetic sequence to exercise the full pipeline. They are smoke tests, not the accuracy experiments reported in the paper.
 
 ```bash
-pip install -e .[all]
-lnas doctor
-pytest
+lnas search --space snasnet --dataset synthetic --timesteps 4 \
+  --budget 3 --image-size 8 --batch-size 1 --output runs/snasnet-smoke
+
+lnas search --space autost --dataset synthetic --timesteps 4 \
+  --budget 2 --image-size 8 --batch-size 1 --output runs/autost-smoke
+```
+
+Score the winning candidate again using its saved architecture. For instance:
+
+```bash
+lnas score --space snasnet --architecture runs/snasnet-smoke/best.json \
+  --dataset synthetic --timesteps 4 --image-size 8 --batch-size 1
+```
+
+The command uses K=8, a one-step warm-up and an `epsilon` of `1e-8` by default. `--probes`, `--warmup`, `--epsilon`, and `--seed` expose these settings when running controlled checks. Search outputs are `search.jsonl` (one record per architecture–timestep evaluation) and `best.json` (the best eligible candidate or `null`).
+
+## Search on CIFAR10-DVS
+
+Prepare the event dataset in `<root>/cifar10dvs` using the format expected by SpikingJelly's `CIFAR10DVS` class. A seeded 90/10 partition reserves 10% of samples; proxy evaluation draws only from the training partition. Each timestep setting is independently converted into event frames; the same sample indices and weight-initialization seed are used for candidate comparisons. Proxy inputs have shape `[batch, time, 2, height, width]`.
+
+```bash
+lnas search --space snasnet --dataset cifar10dvs --data-root /datasets \
+  --image-size 128 --batch-size 1 --timesteps 10 --budget 100 \
+  --device cuda:0 --output runs/snasnet-cifar10dvs
+
+lnas search --space autost --dataset cifar10dvs --data-root /datasets \
+  --image-size 128 --batch-size 1 --timesteps 10 --budget 100 \
+  --device cuda:0 --output runs/autost-cifar10dvs
+```
+
+Increase `--budget` according to the available hardware. AutoST configurations include depth up to ten and can require considerable GPU memory; start with a small mini-batch.
+
+## Joint architecture and timestep search
+
+JATST scores unique `(architecture, timesteps)` pairs with the same FTLE definition. `--method random` proposes pairs uniformly from each space and the listed timestep values. `--method evolution` starts with up to 20 random pairs, selects parents among the top ten, and proposes mutation or crossover with equal probability. The budget always counts evaluated pairs rather than training epochs.
+
+```bash
+lnas jatst --space snasnet --dataset cifar10dvs --data-root /datasets \
+  --image-size 128 --batch-size 1 --timesteps 2 4 6 8 10 12 14 \
+  --budget 100 --method evolution --device cuda:0 --output runs/jatst-snasnet
+
+lnas jatst --space autost --dataset cifar10dvs --data-root /datasets \
+  --image-size 128 --batch-size 1 --timesteps 2 4 6 8 10 12 14 \
+  --budget 100 --method random --device cuda:0 --output runs/jatst-autost
+```
+
+The same commands accept `--dataset synthetic --image-size 8` for a small dry run. If `best` is `null`, the fixed budget contained no candidate with a negative estimate. All individual raw estimates remain in `search.jsonl`.
+
+## Programmatic use
+
+```python
+from lnas import estimate_ftle
+
+# model.step(frame, state) returns (prediction, tuple_of_recurrent_states).
+# frames is a torch.Tensor of shape [batch, time, channels, height, width].
+result = estimate_ftle(model, frames, k=8, warmup=1, epsilon=1e-8)
+print(result.estimate, result.eligible, result.score)
+```
+
+Each search space uses the architecture variables described by its source project. AutoST samples embedding dimension and depth together with per-block attention head counts and MLP ratios. The local state-explicit models are **compact reference adapters** so that the proxy and JATST can be exercised without a separate training framework. They are not checkpoint-compatible reproductions of the upstream full backbones. The AutoST adapter uses spiking attention without softmax, and the SNASNet adapter includes forward and feedback cell connections. Consult [THIRD_PARTY.md](THIRD_PARTY.md) for source projects.
+
+The supplied article source `NN-subsssss(2).tex` specifies K=1; **this repository uses the requested K=8**. Numerical scores, rankings, selected architectures, and published results must be rechecked under K=8 before they can be attributed to this implementation.
+
+## Verification and license
+
+```bash
 ruff check .
+pytest
+python -m compileall -q src tests
 ```
 
-The paper experiments used PyTorch 2.3.1 and SpikingJelly 0.0.0.0.12. The package accepts compatible PyTorch 2.3--2.4 releases.
-
-## Quick verification
-
-The smoke test is CPU-only and downloads no data.
-
-```bash
-bash scripts/smoke_test.sh
-```
-
-It validates environment discovery, one LLE score, and a three-candidate search under `configs/smoke.yaml`.
-
-## Dataset layout
-
-Set `dataset.root` in YAML or override it on the command line.
-
-| Dataset | Name | Expected location |
-|---|---|---|
-| N-MNIST | `nmnist` | `<root>/nmnist` |
-| CIFAR10-DVS | `cifar10dvs` | `<root>/cifar10dvs` |
-| DVS128 Gesture | `dvs128gesture` | `<root>/dvs128gesture` |
-| N-Caltech101 | `ncaltech101` | `<root>/ncaltech101` |
-| CIFAR-10 | `cifar10` | `<root>/cifar10` |
-| ImageNet-1K | `imagenet` | `<root>/imagenet/{train,val}` |
-
-Event datasets are loaded as frame sequences. Static images are repeated along the temporal axis by the shared data adapter. ImageNet must be prepared manually.
-
-## Score and search
-
-Score the default SNASNet candidate:
-
-```bash
-lnas score \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --set dataset.root=/datasets \
-  --set device=cuda:0
-```
-
-Score an architecture stored in `best.json`:
-
-```bash
-lnas score \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --architecture runs/snasnet_cifar10dvs/best.json
-```
-
-Run architecture-only random or evolutionary search:
-
-```bash
-bash scripts/search_snasnet.sh --set dataset.root=/datasets
-bash scripts/search_autosnn.sh --set dataset.root=/datasets
-bash scripts/search_autost.sh --set dataset.root=/datasets
-```
-
-Search outputs are written to the configured directory as `search.jsonl` and `best.json`. Every candidate in one run receives the same cached minibatch and initialization seed.
-
-## Joint architecture--timestep search
-
-JATST searches architecture--timestep pairs directly. Both random search and evolutionary search consume the same total number of proxy evaluations; no nested Bayesian optimizer is used.
-
-```bash
-bash scripts/jatst_snasnet.sh \
-  --set dataset.root=/datasets \
-  --set search.method=evolution \
-  --set search.candidates=1000 \
-  --set 'search.timesteps=[2,4,6,8,10,12,14]'
-```
-
-The selected timestep is stored as `details.timestep` in each result record.
-
-## Train a selected architecture
-
-```bash
-lnas train \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --architecture runs/snasnet_cifar10dvs/best.json \
-  --set dataset.root=/datasets
-```
-
-The command writes `best.pt` and `training.json`. To train an entire scored candidate pool and create the accuracy CSV used by the rank-correlation calculation:
-
-```bash
-python scripts/train_pool.py \
-  --config configs/experiments/snasnet_cifar10dvs.yaml \
-  --scores runs/fig3/snasnet/lle/search.jsonl \
-  --output runs/fig3/snasnet/training \
-  --limit 100 \
-  --set dataset.root=/datasets
-```
-
-## Reproduce manuscript analyses
-
-| Manuscript item | Command | Primary output |
-|---|---|---|
-| Fig. 1 dynamical bridge | `bash scripts/fig1_dynamics.sh --set dataset.root=/datasets` | `runs/fig1_dynamics/perturbation.json` |
-| Fig. 3 five-space scoring | `bash scripts/fig3_proxy_scores.sh /datasets` | `runs/fig3/<space>/<proxy>/search.jsonl` |
-| Fig. 3 rank statistics | `python scripts/rank_correlation.py --scores ... --accuracies ...` | JSON on stdout |
-| Fig. 4 robustness | commands in `docs/experiments.md` | one `score.json` per condition |
-| Proxy time and memory | `bash scripts/profile_proxies.sh --set dataset.root=/datasets` | `runs/profile/profile.json` |
-| JATST | `bash scripts/jatst_snasnet.sh --set dataset.root=/datasets` | `search.jsonl`, `best.json` |
-| Final architecture training | `lnas train ... --architecture <best.json>` | `best.pt`, `training.json` |
-
-Exact protocols, configuration overrides, output schemas, and the mapping from every paper table/figure to commands are in [docs/experiments.md](docs/experiments.md).
-
-## LLE configuration
-
-| Key | Meaning |
-|---|---|
-| `proxy.probes` | Number of independently initialized tangent directions |
-| `proxy.warmup_steps` | State transitions completed before tangent propagation |
-| `proxy.epsilon` | Lower clamp for tangent norms before logarithms |
-| `proxy.batches` | Cached minibatches evaluated for each candidate |
-| `proxy.repeats` | Repeated proxy evaluations averaged per candidate |
-| `search.candidates` | Total candidate or architecture--timestep evaluation budget |
-| `search.timesteps` | Explicit timestep choices used by JATST |
-
-The reported ranking score is `-abs(raw_value)`, where `raw_value` is the maximum directional finite-time growth estimate over the configured probes. Both values and estimator diagnostics are preserved in result files.
-
-## Repository layout
-
-```text
-configs/experiments/    Experiment configurations
-docs/                   Reproduction protocols
-scripts/                Search, analysis, profiling, and training entry points
-src/lnas/analysis/      Perturbation-growth and resource measurements
-src/lnas/data/          Dataset registry and temporal input normalization
-src/lnas/models/        State-explicit SNNs and search-space builders
-src/lnas/proxies/       LLE, HD, SAHD, and FLOPs proxies
-src/lnas/search/        Architecture and joint architecture--timestep search
-tests/                  Configuration, model, proxy, and search tests
-```
-
-## Citation
-
-If this repository supports your work, cite the metadata in [CITATION.cff](CITATION.cff). Until the revised paper is publicly available, bibliographic fields marked as provisional should be checked before submission.
-
-## License
-
-Released under the [MIT License](LICENSE). Third-party code and datasets retain their original terms; see [THIRD_PARTY.md](THIRD_PARTY.md).
+Released under the [MIT License](LICENSE). Cite the manuscript information in [CITATION.cff](CITATION.cff).
