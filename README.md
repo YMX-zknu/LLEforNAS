@@ -1,9 +1,9 @@
-# L-NAS: training-free spiking architecture search
+# L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search
 
 [![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-An implementation of the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST). This focused repository includes a convolutional SNASNet search-space adapter and a spiking Transformer AutoST search-space adapter.
+This repository contains the implementation code for the paper **“L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search”**. It provides the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST), with a convolutional SNASNet search-space adapter and a spiking Transformer AutoST search-space adapter.
 
 ## What the repository does
 
