@@ -3,13 +3,13 @@
 [![Python checks](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/YMX-zknu/LLEforNAS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This repository contains the implementation code for the paper **“L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search”**. It provides the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST), with a convolutional SNASNet search-space adapter and a spiking Transformer AutoST tiny search-space adapter.
+This repository contains the implementation code for the paper **“L-NAS: A finite-time Lyapunov-guided training-free framework for spiking neural architecture search”**. It provides the finite-time Lyapunov exponent (FTLE) proxy and joint architecture and timestep search without training (JATST) for the convolutional SNASNet and spiking Transformer AutoST tiny search spaces.
 
 ## What the repository does
 
 The FTLE proxy evaluates an untrained network on one fixed mini-batch. At each timestep, it propagates **eight independently initialized tangent vectors** with Jacobian-vector products, normalizes them, and accumulates their logarithmic growth. The maximum of the eight directional estimates is the raw FTLE estimate. Candidates are eligible for selection only if that estimate is **negative**; among eligible candidates, the estimate closest to zero ranks highest. No full Jacobian, Jacobian product, or SVD is constructed.
 
-The estimator is a finite-direction approximation to the maximum finite-time growth rate, not an exact SVD. The reported proxy score is `null` when the estimate is nonnegative. JATST then selects no architecture if its entire evaluation budget produces no eligible candidate. A search evaluation does **not** train candidate weights; full final-model training is beyond this compact demonstration.
+The estimator is a finite-direction approximation to the maximum finite-time growth rate, not an exact SVD. The reported proxy score is `null` when the estimate is nonnegative. JATST then selects no architecture if its entire evaluation budget produces no eligible candidate. Candidate weights are not trained during search; the selected architecture can be trained separately.
 
 ## Requirements
 
@@ -92,9 +92,9 @@ result = estimate_ftle(model, frames, k=8, warmup=1, epsilon=1e-8)
 print(result.estimate, result.eligible, result.score)
 ```
 
-SNASNet candidates use the source project's backward-cell encoding: each node pair has at most one directed edge, the direct input-to-output edge is present, and disconnected intermediate nodes are removed. The cell carries delayed feedback across timesteps. AutoST follows the upstream **tiny** search-space configuration, sampling embedding dimension and depth together with per-block attention head counts and MLP ratios. The local state-explicit models are **compact reference adapters** so that the proxy and JATST can be exercised without a separate training framework. They are not checkpoint-compatible reproductions of the upstream full backbones. The AutoST adapter uses spiking attention without softmax; its simplified patch stem and blocks differ from the upstream full model. Consult [THIRD_PARTY.md](THIRD_PARTY.md) for source projects.
+SNASNet candidates use the source project's backward-cell encoding: each node pair has at most one directed edge, the direct input-to-output edge is present, and disconnected intermediate nodes are removed. The cell carries delayed feedback across timesteps. AutoST follows the upstream **tiny** search-space configuration, sampling embedding dimension and depth together with per-block attention head counts and MLP ratios. The AutoST model uses spiking attention without softmax. Consult [THIRD_PARTY.md](THIRD_PARTY.md) for source projects.
 
-The supplied article source `NN-subsssss(2).tex` specifies K=1; **this repository uses the requested K=8**. Numerical scores, rankings, selected architectures, and published results must be rechecked under K=8 before they can be attributed to this implementation.
+The default is K=8; use `--probes` to set a different number of tangent directions.
 
 ## Verification and license
 
